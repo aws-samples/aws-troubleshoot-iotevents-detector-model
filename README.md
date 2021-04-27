@@ -1,11 +1,6 @@
-## My Project
+## Repository for AWS IoT blog post "How to troubleshoot an AWS IoT Events detector model"
 
-TODO: Fill this README out!
-
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+This repository includes the sample detector model (sample-detector-model.json) file that can be imported in AWS IoT Events.
 
 ## Security
 

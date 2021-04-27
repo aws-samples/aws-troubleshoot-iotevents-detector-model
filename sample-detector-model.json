@@ -1,0 +1,647 @@
+{
+  "detectorModelName": "areaDetectorModel",
+  "detectorModelDefinition": {
+    "states": [
+      {
+        "stateName": "start",
+        "onEnter": {
+          "events": [
+            {
+              "eventName": "prepare",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "resetMe",
+                    "value": "\"true\""
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "sensorId",
+                    "value": "0"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "reportedTemperature",
+                    "value": "60.1"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "averageTemperature",
+                    "value": "10.0"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "sensorCount",
+                    "value": "10"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "rangeHigh",
+                    "value": "75"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "rangeLow",
+                    "value": "65"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "anomalousHigh",
+                    "value": "80"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "anomalousLow",
+                    "value": "60"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "onInput": {
+          "transitionEvents": [
+            {
+              "eventName": "reset",
+              "condition": "($variable.resetMe == true) && ($input.temperatureInput.sensorData.temperature < 80 && $input.temperatureInput.sensorData.temperature > 60)",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "averageTemperature",
+                    "value": "((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount)"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "desiredTemperature",
+                    "value": "65"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "allowedError",
+                    "value": "1"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "noDelay",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "idle"
+            }
+          ]
+        },
+        "onExit": {
+          "events": [
+            {
+              "eventName": "resetHeatCool",
+              "condition": "true",
+              "actions": [
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOff"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOff"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/Off"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/Off"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "stateName": "idle",
+        "onInput": {
+          "events": [
+            {
+              "eventName": "whatWasInput",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "sensorId",
+                    "value": "$input.temperatureInput.sensorId"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "reportedTemperature",
+                    "value": "$input.temperatureInput.sensorData.temperature"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "calculateAverage",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.anomalousHigh && $input.temperatureInput.sensorData.temperature > $variable.anomalousLow",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "averageTemperature",
+                    "value": "((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount)"
+                  }
+                }
+              ]
+            }
+          ],
+          "transitionEvents": [
+            {
+              "eventName": "anomalousInputArrived",
+              "condition": "$input.temperatureInput.sensorData.temperature >= $variable.anomalousHigh || $input.temperatureInput.sensorData.temperature <= $variable.anomalousLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/anomaly"
+                  }
+                }
+              ],
+              "nextState": "idle"
+            },
+            {
+              "eventName": "highTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature > $variable.rangeHigh",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "cooling"
+            },
+            {
+              "eventName": "lowTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.rangeLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "heating"
+            },
+            {
+              "eventName": "highTemperatureThreshold",
+              "condition": "(((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount) > ($variable.desiredTemperature + $variable.allowedError))",
+              "actions": [
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "cooling"
+            },
+            {
+              "eventName": "lowTemperatureThreshold",
+              "condition": "(((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount) < ($variable.desiredTemperature - $variable.allowedError))",
+              "actions": [
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "heating"
+            }
+          ]
+        }
+      },
+      {
+        "stateName": "cooling",
+        "onEnter": {
+          "events": [
+            {
+              "eventName": "delay",
+              "condition": "!$variable.noDelay && $variable.enteringNewState",
+              "actions": [
+                {
+                  "setTimer": {
+                    "timerName": "coolingTimer",
+                    "seconds": 180
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "false"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "dontDelay",
+              "condition": "$variable.noDelay == true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "true"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "beenHere",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "false"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "onInput": {
+          "events": [
+            {
+              "eventName": "whatWasInput",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "sensorId",
+                    "value": "$input.temperatureInput.sensorId"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "reportedTemperature",
+                    "value": "$input.temperatureInput.sensorData.temperature"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "calculateAverage",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.anomalousHigh && $input.temperatureInput.sensorData.temperature > $variable.anomalousLow",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "averageTemperature",
+                    "value": "((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount)"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "areWeThereYet",
+              "condition": "(timeout(\"coolingTimer\"))",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "true"
+                  }
+                }
+              ]
+            }
+          ],
+          "transitionEvents": [
+            {
+              "eventName": "anomalousInputArrived",
+              "condition": "$input.temperatureInput.sensorData.temperature >= $variable.anomalousHigh || $input.temperatureInput.sensorData.temperature <= $variable.anomalousLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/anomaly"
+                  }
+                }
+              ],
+              "nextState": "cooling"
+            },
+            {
+              "eventName": "highTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature > $variable.rangeHigh",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                }
+              ],
+              "nextState": "cooling"
+            },
+            {
+              "eventName": "lowTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.rangeLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOff"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/Off"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "heating"
+            },
+            {
+              "eventName": "desiredTemperature",
+              "condition": "(((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount) <= ($variable.desiredTemperature - $variable.allowedError)) && $variable.goodToGo == true",
+              "actions": [
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOff"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/Off"
+                  }
+                }
+              ],
+              "nextState": "idle"
+            }
+          ]
+        }
+      },
+      {
+        "stateName": "heating",
+        "onEnter": {
+          "events": [
+            {
+              "eventName": "delay",
+              "condition": "!$variable.noDelay && $variable.enteringNewState",
+              "actions": [
+                {
+                  "setTimer": {
+                    "timerName": "heatingTimer",
+                    "seconds": 120
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "false"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "dontDelay",
+              "condition": "$variable.noDelay == true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "true"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "beenHere",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "false"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "onInput": {
+          "events": [
+            {
+              "eventName": "whatWasInput",
+              "condition": "true",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "sensorId",
+                    "value": "$input.temperatureInput.sensorId"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "reportedTemperature",
+                    "value": "$input.temperatureInput.sensorData.temperature"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "calculateAverage",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.anomalousHigh && $input.temperatureInput.sensorData.temperature > $variable.anomalousLow",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "averageTemperature",
+                    "value": "((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount)"
+                  }
+                }
+              ]
+            },
+            {
+              "eventName": "areWeThereYet",
+              "condition": "(timeout(\"heatingTimer\"))",
+              "actions": [
+                {
+                  "setVariable": {
+                    "variableName": "goodToGo",
+                    "value": "true"
+                  }
+                }
+              ]
+            }
+          ],
+          "transitionEvents": [
+            {
+              "eventName": "anomalousInputArrived",
+              "condition": "$input.temperatureInput.sensorData.temperature >= $variable.anomalousHigh || $input.temperatureInput.sensorData.temperature <= $variable.anomalousLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/anomaly"
+                  }
+                }
+              ],
+              "nextState": "heating"
+            },
+            {
+              "eventName": "highTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature > $variable.rangeHigh",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOff"
+                  }
+                },
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:coolOn"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/Off"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Cooling/On"
+                  }
+                },
+                {
+                  "setVariable": {
+                    "variableName": "enteringNewState",
+                    "value": "true"
+                  }
+                }
+              ],
+              "nextState": "cooling"
+            },
+            {
+              "eventName": "lowTemperatureSpike",
+              "condition": "$input.temperatureInput.sensorData.temperature < $variable.rangeLow",
+              "actions": [
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "temperatureSensor/spike"
+                  }
+                }
+              ],
+              "nextState": "heating"
+            },
+            {
+              "eventName": "desiredTemperature",
+              "condition": "(((($variable.averageTemperature * ($variable.sensorCount - 1)) + $input.temperatureInput.sensorData.temperature) / $variable.sensorCount) >= ($variable.desiredTemperature + $variable.allowedError)) && $variable.goodToGo == true",
+              "actions": [
+                {
+                  "sns": {
+                    "targetArn": "arn:aws:sns:us-west-2:123456789012:heatOff"
+                  }
+                },
+                {
+                  "iotTopicPublish": {
+                    "mqttTopic": "hvac/Heating/Off"
+                  }
+                }
+              ],
+              "nextState": "idle"
+            }
+          ]
+        }
+      }
+    ],
+    "initialStateName": "start"
+  },
+  "key": "areaId",
+  "roleArn": "arn:aws:iam::123456789012:role/IoTEventsRole"
+}
